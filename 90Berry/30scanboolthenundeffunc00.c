@@ -20,6 +20,6 @@ void main() {
         f();
         return;
     }
-    fprintf(stdout, "%b\n", b);
+    fprintf(stdout, "%b\n", x);
     return;
 }

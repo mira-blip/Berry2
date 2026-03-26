@@ -25,4 +25,5 @@ void main() {
         fprintf(stdout, "%d", x) ;
     }
     fprintf(stdout, "%d", x) ;
+    return;
 }
