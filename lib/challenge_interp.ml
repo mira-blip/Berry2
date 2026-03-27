@@ -47,6 +47,7 @@ module Value = struct
     | V_Int of int
     | V_Bool of bool
     | V_Str of string
+    | V_Loc of int
     [@@deriving show]
 
   (* to_string v = a string representation of v (more human-readable than
@@ -59,6 +60,7 @@ module Value = struct
     | V_Int n -> Int.to_string n
     | V_Bool b -> Bool.to_string b
     | V_Str s -> s
+    | V_Loc l -> Int.to_string l
 end
 
 (* Module for input/output built-in functions.
@@ -168,23 +170,400 @@ module Io = struct
 
 end
 
-(* Module for environments.
+let binop (operation : Ast.Expr.binop) (v1 : Value.t) (v2 : Value.t) : Value.t = 
+  match (operation, v1, v2) with 
+
+  | (Ast.Expr.Plus, Value.V_Int v, Value.V_Int v') -> Value.V_Int (v + v')
+
+  | (Ast.Expr.Minus, Value.V_Int v, Value.V_Int v') -> Value.V_Int (v - v')
+
+  | (Ast.Expr.Times, Value.V_Int v, Value.V_Int v') -> Value.V_Int (v * v')
+
+  | (Ast.Expr.Div, Value.V_Int v, Value.V_Int v') -> if v' = 0 then raise Division_by_zero else Value.V_Int (v / v')
+
+  | (Ast.Expr.Mod, Value.V_Int v, Value.V_Int v') -> if v' = 0 then raise Division_by_zero else Value.V_Int (v mod v')
+
+  | (Ast.Expr.And, Value.V_Bool v, Value.V_Bool v') -> Value.V_Bool (v && v')
+
+  | (Ast.Expr.Or,Value.V_Bool v, Value.V_Bool v') -> Value.V_Bool (v || v')
+
+  | (Ast.Expr.Eq, Value.V_Int v, Value.V_Int v') -> if v = v' then Value.V_Bool (true) else Value.V_Bool (false)
+
+  | (Ast.Expr.Eq, Value.V_Bool v, Value.V_Bool v') -> if v = v' then Value.V_Bool (true) else Value.V_Bool (false)
+
+  | (Ast.Expr.Ne, Value.V_Int v, Value.V_Int v') -> if v = v' then Value.V_Bool (false) else Value.V_Bool (true)
+
+  | (Ast.Expr.Ne, Value.V_Bool v, Value.V_Bool v') -> if v = v' then Value.V_Bool (false) else Value.V_Bool (true)
+
+  | (Ast.Expr.Lt, Value.V_Int v, Value.V_Int v') -> if v < v' then Value.V_Bool (true) else Value.V_Bool (false)
+
+  | (Ast.Expr.Le, Value.V_Int v, Value.V_Int v') -> if v <= v' then Value.V_Bool (true) else Value.V_Bool (false)
+
+  | (Ast.Expr.Gt, Value.V_Int v, Value.V_Int v') -> if v > v' then Value.V_Bool (true) else Value.V_Bool (false)
+  
+  | (Ast.Expr.Ge, Value.V_Int v, Value.V_Int v') -> if v >= v' then Value.V_Bool (true) else Value.V_Bool (false)
+
+  | _ -> raise (TypeError "invalid operation")
+
+let unop (operation : Ast.Expr.unop) (v : Value.t) : Value.t = 
+  match (operation, v) with 
+
+  | (Ast.Expr.Neg, Value.V_Int v') -> Value.V_Int (-v')
+
+  | (Ast.Expr.Not, Value. V_Bool v') -> Value.V_Bool (not v')
+
+  | _ -> raise (TypeError "invalid operation")
+  (* Module for environments.
  *)
 module Env = struct
+  type t = (Ast.Id.t * Value.t) list
+  [@@deriving show]
+
+  (*  empty = ρ, where dom ρ = ∅.
+   *)
+  let empty : t = []
+
+
+  (** lookup env x = v, where v = env(x)
+  * returns the value bound to x
+  * raises unbound variable if not_found is returned; meaning the binding does not exist
+  *)
+  let lookup (env : t) (x : Ast.Id.t) : Value.t = 
+    try List.assoc x env 
+    with Not_found -> raise (UnboundVariable x)
+
+  (** add env x v = env p{x->v}
+  * adds new binding in the environment
+  *)
+  let add (env : t) (x : Ast.Id.t) (v : Value.t) : t =
+  if List.mem_assoc x env then raise (MultipleDeclaration x)
+  else (x, v) :: env
+
+  (** update env x v = env p{x->v}
+  * creates a new binding in the envrionment and removes the old one
+  *)
+  let update (env : t) (x : Ast.Id.t) (v : Value.t) : t =
+  if List.mem_assoc x env then
+    (x, v) :: List.remove_assoc x env
+  else
+    raise (UnboundVariable x)
+
+end
+module EnvBlock = struct
+  type t = Env.t list
+
+  let empty : t = [Env.empty]
+  (** enter a new block
+  * we add a new empty environment to the head of the list
+  *)
+  let enter_block (eb : t) : t =
+    Env.empty :: eb
+  
+  (** exit a block
+  *)
+  let exit_block (eb : t) : t =
+    match eb with
+    | [] -> failwith "cannot exit empty block"
+    | _ :: rest -> rest
+
+  (** we look for the variable in the environments
+  * starting at the head and working backwards
+  *)
+  let rec lookup (eb : t) (x : Ast.Id.t) : Value.t =
+    match eb with
+  | [] -> raise (UnboundVariable x)
+  | env :: rest ->
+      try Env.lookup env x
+      with UnboundVariable _ -> lookup rest x
+  
+  (** we add the declared variable to the environment
+  * at the head of the list
+  *)
+  let add (eb : t) (x : Ast.Id.t) (v : Value.t) : t =
+  match eb with
+  | [] -> failwith "no active scope"
+  | env :: rest -> Env.add env x v :: rest
+  
+  (** update variable in the nearest scope
+  * and raise exception if variable doesn't exist in any
+  *)
+  let rec update (eb : t) (x : Ast.Id.t) (v : Value.t) : t =
+  match eb with
+  | [] -> raise (UnboundVariable x)
+  | env :: rest ->
+      if List.mem_assoc x env then
+        Env.update env x v :: rest
+      else
+        env :: update rest x v
+end
+
+module Frame = struct
+  type t = 
+  | EnvBlockFrame of EnvBlock.t 
+  | ReturnFrame of Value.t
+
+  let empty : t = EnvBlockFrame EnvBlock.empty
+end
+
+module Store = struct
+  type t = {
+    mem : Value.t array;
+    next : int ref;
+  }
+
+  (**
+  * making array with undefined size
+  *)
+  let make (size : int) : t = { 
+      mem = Array.make size Value.V_Undefined;
+      next = ref 0 
+    }
+
+  (**
+  * checking location and raising segmentation error if overflow
+  *)
+  let check_loc (st : t) (loc : int) : unit =
+    if loc < 0 || loc >= Array.length st.mem then
+      raise (SegmentationError  loc)
+  
+  (* get element at index*)
+  let get (st : t) (loc : int) : Value.t =
+    check_loc st loc;
+    Array.get st.mem loc
+  
+  (* update location *)
+  let set (st : t) (loc : int) (v : Value.t) : unit =
+    check_loc st loc;
+    Array.set st.mem loc v
+  
+  (* allocating memory *)
+  let alloc (st : t) (n : int) : int =
+    let base = !(st.next) in
+    if n < 0 || base + n > Array.length st.mem then
+      raise OutOfMemoryError
+    else begin
+      st.next := base + n;
+      base
+    end
 end
 
 (* exec p:  Execute the program `p`.
  *)
-let exec (_ : Ast.Prog.t) : unit =
-
-
-  let eval (e : Ast.Expr.t) : Value.t =
-    failwith (
-      Printf.sprintf "Unimplemented: eval: %s" (Ast.Expr.show e)
-    )
+let exec (p : Ast.Prog.t) : unit =
+  let funs =
+    match p with
+    | Ast.Prog.Pgm fs -> fs
   in
 
-  let _ = eval (Call("main", [])) in
-  ()
+  let find_function (name : Ast.Id.t) : Ast.Prog.fundef =
+    try List.find (fun (f, _, _) -> f = name) funs
+    with Not_found -> raise (UndefinedFunction name)
+  in
 
+    let rec eval (eb : EnvBlock.t) (st : Store.t) (e : Ast.Expr.t)
+    : Value.t * Store.t =
+    match e with
+    | Ast.Expr.Var x ->
+        (EnvBlock.lookup eb x, st)
+
+    | Ast.Expr.Num n ->
+        (Value.V_Int n, st)
+
+    | Ast.Expr.Bool b ->
+        (Value.V_Bool b, st)
+
+    | Ast.Expr.Str s ->
+        (Value.V_Str s, st)
+
+    | Ast.Expr.Unop (op, e1) ->
+        let (v1, st1) = eval eb st e1 in
+        (unop op v1, st1)
+
+    | Ast.Expr.Binop (op, e1, e2) ->
+        let (v1, st1) = eval eb st e1 in
+        let (v2, st2) = eval eb st1 e2 in
+        (binop op v1 v2, st2)
+
+    | Ast.Expr.Index (xs, i) ->
+        let base =
+          match EnvBlock.lookup eb xs with
+          | Value.V_Loc l -> l
+          | _ -> raise (TypeError "indexed variable is not an array")
+        in
+        let (iv, st1) = eval eb st i in
+        let size =
+          match iv with
+          | Value.V_Int n -> n
+          | _ -> raise (TypeError "array index must be int")
+        in
+        (Store.get st1 (base + size), st1)
+
+    | Ast.Expr.Call (fname, args) ->
+        begin
+          match fname, args with
+          | "fprintf", _ :: fmt_exp :: rest ->
+              let (fmtv, st1) = eval eb st fmt_exp in
+              let fmt =
+                match fmtv with
+                | Value.V_Str s -> s
+                | _ -> raise (TypeError "format must be string")
+              in
+              let (vs, st2) = eval_args eb st1 rest in
+              Io.do_fprintf fmt vs;
+              (Value.V_None, st2)
+
+          | _ ->
+              let (arg_vals, st1) = eval_args eb st args in
+              let (_, params, ss) = find_function fname in
+              let local_env =
+                List.fold_left2
+                  (fun env param arg -> Env.add env param arg)
+                  Env.empty
+                  params
+                  arg_vals
+              in
+              let local_eb = [local_env] in
+              begin
+                match exec_stms local_eb st1 ss with
+                | (Frame.ReturnFrame v, st2) -> (v, st2)
+                | (Frame.EnvBlockFrame _, _) -> raise (NoReturn fname)
+              end
+        end
+
+  and eval_args (eb : EnvBlock.t) (st : Store.t) (args : Ast.Expr.t list)
+    : Value.t list * Store.t =
+    match args with
+    | [] -> ([], st)
+    | a :: rest ->
+        let (v, st1) = eval eb st a in
+        let (vs, st2) = eval_args eb st1 rest in
+        (v :: vs, st2)
+
+  and exec_stm (eb : EnvBlock.t) (st : Store.t) (s : Ast.Stm.t)
+    : Frame.t * Store.t =
+    match s with
+    | Ast.Stm.Assign (x, e) ->
+        let (v, st1) = eval eb st e in
+        (Frame.EnvBlockFrame (EnvBlock.update eb x v), st1)
+
+    | Ast.Stm.Fscanf (_filevar, fmt, target) ->
+        let v =
+          try Io.do_fscanf fmt
+          with _ -> raise (TypeError "bad scanf input")
+        in
+        (Frame.EnvBlockFrame (EnvBlock.update eb target v), st)
+
+    | Ast.Stm.VarDec decls ->
+        let rec go eb st ds =
+          match ds with
+          | [] -> (Frame.EnvBlockFrame eb, st)
+          | (x, init) :: rest ->
+              begin
+                match init with
+                | None ->
+                    let eb' = EnvBlock.add eb x Value.V_Undefined in
+                    go eb' st rest
+                | Some e ->
+                    let (v, st1) = eval eb st e in
+                    let eb' = EnvBlock.add eb x v in
+                    go eb' st1 rest
+              end
+        in
+        go eb st decls
+  
+    | Ast.Stm.ArrayDec decls ->
+        let rec go eb st ds =
+          match ds with
+          | [] -> (Frame.EnvBlockFrame eb, st)
+          | (xs, e) :: rest ->
+              let (szv, st1) = eval eb st e in
+              let n =
+                match szv with
+                | Value.V_Int k -> k
+                | _ -> raise (TypeError "array size must be int")
+              in
+              let base = Store.alloc st1 n in
+              let eb' = EnvBlock.add eb xs (Value.V_Loc base) in
+              go eb' st1 rest
+        in
+        go eb st decls
+
+    | Ast.Stm.IndexAssign (xs, i, e) ->
+        let base =
+          match EnvBlock.lookup eb xs with
+          | Value.V_Loc l -> l
+          | _ -> raise (TypeError "indexed variable is not an array")
+        in
+        let (iv, st1) = eval eb st i in
+        let size =
+          match iv with
+          | Value.V_Int n -> n
+          | _ -> raise (TypeError "array index must be int")
+        in
+        let (v, st2) = eval eb st1 e in
+        Store.set st2 (base + size) v;
+        (Frame.EnvBlockFrame eb, st2)
+
+    | Ast.Stm.Expr e ->
+        let (_, st1) = eval eb st e in
+        (Frame.EnvBlockFrame eb, st1)
+
+    | Ast.Stm.Block ss ->
+        let eb' = EnvBlock.enter_block eb in
+        begin
+          match exec_stms eb' st ss with
+          | (Frame.EnvBlockFrame eb_after, st1) ->
+              (Frame.EnvBlockFrame (EnvBlock.exit_block eb_after), st1)
+          | (Frame.ReturnFrame v, st1) ->
+              (Frame.ReturnFrame v, st1)
+        end
+
+    | Ast.Stm.IfElse (e, s1, s2) ->
+        let (cv, st1) = eval eb st e in
+        begin
+          match cv with
+          | Value.V_Bool true -> exec_stm eb st1 s1
+          | Value.V_Bool false -> exec_stm eb st1 s2
+          | _ -> raise (TypeError "if condition must be bool")
+        end
+
+    | Ast.Stm.While (e, s) ->
+        let (cv, st1) = eval eb st e in
+        begin
+          match cv with
+          | Value.V_Bool true ->
+              begin
+                match exec_stm eb st1 s with
+                | (Frame.ReturnFrame v, st2) -> (Frame.ReturnFrame v, st2)
+                | (Frame.EnvBlockFrame eb', st2) ->
+                    exec_stm eb' st2 (Ast.Stm.While (e, s))
+              end
+          | Value.V_Bool false ->
+              (Frame.EnvBlockFrame eb, st1)
+          | _ ->
+              raise (TypeError "while condition must be bool")
+        end
+
+    | Ast.Stm.Return None ->
+        (Frame.ReturnFrame Value.V_None, st)
+
+    | Ast.Stm.Return (Some e) ->
+        let (v, st1) = eval eb st e in
+        (Frame.ReturnFrame v, st1)
+
+  and exec_stms (eb : EnvBlock.t) (st : Store.t) (ss : Ast.Stm.t list)
+    : Frame.t * Store.t =
+    match ss with
+    | [] -> (Frame.EnvBlockFrame eb, st)
+    | s :: rest ->
+        begin
+          match exec_stm eb st s with
+          | (Frame.EnvBlockFrame eb', st1) -> exec_stms eb' st1 rest
+          | (Frame.ReturnFrame v, st1) -> (Frame.ReturnFrame v, st1)
+        end
+    in
+
+  let st0 = Store.make 100 in
+  let _ = eval EnvBlock.empty st0 (Ast.Expr.Call ("main", [])) in
+  ()
 

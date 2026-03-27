@@ -323,20 +323,35 @@ let exec (p : Ast.Prog.t) : unit =
     | Ast.Expr.Unop (op, e1) -> unop op (eval eb e1)
     | Ast.Expr.Binop (op, e1, e2) -> binop op (eval eb e1) (eval eb e2)
     | Ast.Expr.Call (fname, args) ->
-        let (_, params, ss) = find_function fname in
-        let arg_vals = List.map (fun a -> eval eb a) args in
-        let local_env =
-          List.fold_left2
-            (fun env param arg -> Env.add env param arg)
-            Env.empty
-            params
-            arg_vals
-        in
-        let local_eb = [local_env] in
         begin
-          match exec_stms local_eb ss with
-          | Frame.ReturnFrame v -> v
-          | Frame.EnvBlockFrame _ -> raise (NoReturn fname)
+          match fname, args with
+
+          (* fprintf case *)
+          | "fprintf", _stream :: fmt_exp :: rest ->
+              let fmt =
+                match eval eb fmt_exp with
+                | Value.V_Str s -> s
+                | _ -> raise (TypeError "format must be string")
+              in
+              let vs = List.map (fun a -> eval eb a) rest in
+              Io.do_fprintf fmt vs;
+              Value.V_None
+
+          (* normal function *)
+          | _ ->
+              let arg_vals = List.map (fun a -> eval eb a) args in
+              let (_, params, ss) = find_function fname in
+              let local_env =
+                List.fold_left2
+                  (fun env param arg -> Env.add env param arg)
+                  Env.empty
+                  params
+                  arg_vals
+              in
+              let local_eb = [local_env] in
+              match exec_stms local_eb ss with
+              | Frame.ReturnFrame v -> v
+              | Frame.EnvBlockFrame _ -> raise (NoReturn fname)
         end
 
   and exec_stm (eb : EnvBlock.t) (s : Ast.Stm.t) : Frame.t =
