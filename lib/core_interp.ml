@@ -1,6 +1,8 @@
 (* C- interpreter.
  *
  * N. Danner
+
+  * Team Berry: Ramon Ruiz, Dalton Soper, Tamiraa Sanjaajav 
  *)
 
 module Ast = Core_ast
