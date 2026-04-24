@@ -1,0 +1,336 @@
+\documentclass[9pt]{article}
+\title{Project 3: Task 2}
+\author{S. Tamiraa}
+
+\def\utt#1{\underline{\smash{\texttt{#1}}}}
+\usepackage{listings}
+  \lstdefinestyle{ocamlcode}{
+    language=[Objective]Caml,
+	  basicstyle=\normalfont,
+	  keywordstyle=\utt,
+	  morekeywords={int, bool, real, char, string, true, false, not,
+	  	div, mod, list},
+	  identifierstyle=\texttt,
+	  commentstyle=\texttt,
+	  stringstyle=\texttt,
+	  tabsize=2,
+	  showstringspaces=false,
+	  mathescape=true,
+	  alsoletter={0,1,2,3,4,5,6,7,8,9,-,<,>,'},
+  }
+  \lstdefinestyle{ccode}{
+    language=C,
+    keywordstyle=\utt,
+    keywordstyle=[2]\normalfont\texttt,
+    morekeywords={int,bool},
+    identifierstyle=\normalfont\texttt,
+    commentstyle=\normalfont\texttt,
+    stringstyle=\normalfont\texttt,
+    tabsize=4,
+    showstringspaces=false,
+    mathescape=true,
+    alsoletter={0,1,2,3,4,5,6,7,8,9,0,<,>,=,+,-,*,/,|,!,),(,&,\%,[,]},
+  }
+  \lstMakeShortInline|
+
+\usepackage{mathpartir}
+\usepackage{rotating}
+\usepackage{fitch}
+\usepackage[margin=0.5in]{geometry}
+    \newcommand{\der}[3][{}]{\hypo{#1}{#2} #3 }
+    \newcommand{\subder}[3][{}]{\open\hypo{#1}{#2} #3 \close}
+    \newcommand{\tbc}[1][{}]{\open\have{#1}{\cdots}\close}
+    \newcommand{\axiom}[2][{}]{\subder[#1]{#2}{}}
+
+\newcommand{\Ocm}{\mbox{\textrm{OCaml}-}}
+\newcommand{\Cm}{\mbox{\textrm{C}-}}
+\newcommand{\Ocmlet}[3]{\lstinline[style=ocamlcode]!let $\,#1\,$ = $\,#2\,$ in $\,#3$!}
+
+\newcommand{\set}[1]{\left\{#1\right\}}
+\newcommand{\env}[1]{\set{#1}}
+\newcommand{\bind}[2]{{#1}\mapsto{#2}}
+\newcommand{\extend}[3]{#1\env{\bind{#2}{#3}}}
+\newcommand{\emptyenv}{\_}
+\newcommand{\wild}{\_}
+\newcommand{\rhos}{\rho s}
+
+% \expjudge[p] ρs e v = ρs ├_p e ↓ v
+\newcommand{\expjudge}[4][{}]{{#2}\vdash_{#1}{#3}\Downarrow{#4}}
+% \stmjudge[p] s ρs ρs' = s ├_p ρs → ρs'
+\newcommand{\stmjudge}[4][{}]{{#2}\vdash_{#1}{#3}\Rightarrow{#4}}
+
+\begin{document}
+\maketitle
+
+\section{Operational Semantics}
+Rule 1: \[\inferrule{x \in dom(\rhos) \quad \lambda^*\sqsubseteq\rhos(x)\quad\lambda^*\sqsubseteq\lambda }{\stmjudge [\lambda^*] {\texttt{fscanf}(\texttt{stdin}^{\lambda}, \dots, \& x)} {\rhos, chs[in^\lambda := v :: in^\lambda]} {\rhos \{x \mapsto v^{\lambda}\}, chs }}\]
+Rule 2: \[\inferrule{x \in dom(\rhos)\quad \lambda^*\sqsubseteq\rhos(x)}{\stmjudge [\lambda^*] {\texttt{fscanf}(\texttt{stdin}^{\lambda}, \dots, \& x)} {\rhos, chs[in^\lambda := v :: in^\lambda]} {\rhos \{x \mapsto v^{\lambda \sqcup \lambda^*}\}, chs }}\]
+
+\section{Information leaking code}
+
+\lstset{style=ccode}
+
+A program that leaks information if employing Rule 2:
+\begin{lstlisting}
+int main(){
+    bool x, y;
+    bool z = true;
+    fscanf(stdin_hi, "%b", &x);
+    fscanf(stdin_lo, "%b", &y);
+    if(x) fscanf(stdin_lo, "%b", &y);
+    if(y) z = false
+    fprintf(stdout_lo, "%b", z)
+}
+\end{lstlisting}
+
+Tests if using Rule 1:
+\begin{lstlisting}
+(*!test1!
+ *
+ * {
+ *      "input": ["true", "true", "false"],
+ *      "error": ["SecErr"]
+ *  }
+ *)
+(*!test2!
+ *
+ * {
+ *      "input": ["false", "true", "false"],
+ *      "output": ["false"]
+ *  }
+ *)
+\end{lstlisting}
+
+Tests if using Rule 2:
+\begin{lstlisting}
+(*!test1!
+ *
+ * {
+ *      "input": ["true", "true", "false"],
+ *      "output": ["false"]
+ *  }
+ *)
+(*!test2!
+ *
+ * {
+ *      "input": ["false", "true", "false"],
+ *      "output": ["SecErr"]
+ *  }
+ *)
+\end{lstlisting}
+
+
+\section{Derivations}
+
+Derivation of \textbf{Rule 1} on \textbf{Test 1}:
+
+\[
+\begin{nd}
+\der{
+  \expjudge [L] \emptyenv {\lstinline!main ()!} {SecErr}
+}{
+  \subder{
+    \stmjudge [L] {ss} {\emptyenv, chs} {SecErr}
+  }{
+    \subder{
+      \stmjudge [L] {\lstinline!bool x, y!} {\emptyenv, \langle[\texttt{true}][][\texttt{true,false}][]\rangle} {\{x \mapsto ?^L, y \mapsto ?^L\}, chs}
+      }{
+      \axiom {x \notin dom(\rho)}
+      \axiom {y \notin dom(\rho)}
+    }
+    \subder{
+      \stmjudge[L]{\lstinline!bool z = true!}{\rhos, chs}{\rhos', chs}
+    }{
+      \axiom{z \notin dom(\rhos)}
+      \axiom{\expjudge[p,L]{\rhos,chs}{\texttt{true}}{\texttt{true}^L}}
+    }
+    \subder{
+      \stmjudge[L]{\texttt{fscanf}(\texttt{stdin}^{H},\dots, \&x)}{\{x \mapsto ?^L, y \mapsto ?^L\}, chs}{\{x \mapsto \texttt{true}^H, y \mapsto ?^L\}, \langle[],[],[\texttt{true,false}],[]\rangle}
+    }{
+      \axiom {x \in dom(\rhos)}
+      \axiom {L \sqsubseteq (\rhos(x) = H)}
+      \axiom {L \sqsubseteq H}
+    }
+    \subder{
+      \stmjudge[L]{\texttt{fscanf}(\texttt{stdin}^{L},\dots, \&y)}{\{x \mapsto \texttt{true}^H, y \mapsto ?^L\}, chs'}{\{x \mapsto \texttt{true}^H, y \mapsto \texttt{true}^L\}, \langle[],[],[\texttt{false}],[]\rangle}
+    }{
+      \axiom {y \in dom(\rhos')}
+      \axiom {L \sqsubseteq (\rhos'(y) = L)}
+      \axiom {L \sqsubseteq L}
+    }
+    \subder{
+      \stmjudge[L]{\utt{if}(x)\; \texttt{fscanf}(\texttt{stdin}^L, \dots, \&y)}{\rhos, chs''}{SecErr}
+    }{
+      \axiom{\expjudge[L]{\rhos', chs''}{x}{\texttt{true}^H, chs''}}
+      \subder{
+        \stmjudge[H]{\texttt{fscanf}(\texttt{stdin}^{L},\dots, \&y)}{\rhos', chs''}{SecErr}
+      }{
+        \axiom {y \in dom(\rhos')}
+        \axiom {H \sqsubseteq (\rhos'(y) = \texttt{true}^H = H)}
+        \axiom {H \not\sqsubseteq (\lambda = L)}
+      }
+    }
+  }
+}
+\end{nd}
+\]
+
+Derivation of \textbf{Rule 1} on \textbf{Test 2}:
+
+\[
+\begin{nd}
+\der{
+  \expjudge [L] \emptyenv {\lstinline!main ()!} {None, chs'''}
+}{
+  \subder{
+    \stmjudge [L] {ss} {\emptyenv, \langle[\texttt{false}],[],[\texttt{true, false}],[]\rangle = chs} {\{x\mapsto\texttt{false}, y\mapsto\texttt{true}, z\mapsto\texttt{false}\}, chs'''}
+  }{
+    \subder{
+      \stmjudge [L] {\lstinline!bool x, y!} {\emptyenv, chs} \rho{\{x \mapsto ?^L, y \mapsto ?^L\}, chs}
+    }{
+      \axiom {x \notin dom(\rho)}
+      \axiom {y \notin dom(\rho)}
+    }
+    \subder{
+      \stmjudge[L]{\lstinline!bool z = true!}{\rhos, chs}{\rhos', chs}
+    }{
+      \axiom{z \notin dom(\rhos)}
+      \axiom{\expjudge[p,L]{\rhos,chs}{\texttt{true}}{\texttt{true}^L}}
+    }
+    \subder{
+      \stmjudge[L]{\texttt{fscanf}(\texttt{stdin}^{H},\dots, \&x)}{\rhos, chs}{\{x \mapsto \texttt{false}^H, y \mapsto ?^L\}, \langle[],[],[\texttt{true, false}],[]\rangle = chs'}
+    }{
+      \axiom {x \in dom(\rhos)}
+      \axiom {L \sqsubseteq (\rhos(x) = H)}
+      \axiom {L \sqsubseteq H}
+    }
+    \subder{
+      \stmjudge[L]{\texttt{fscanf}(\texttt{stdin}^{L},\dots, \&y)}{\rhos', chs'}{\{x \mapsto \texttt{false}^H, y \mapsto \texttt{true}^H\}, \langle[],[], [\texttt{false}],[]\rangle}
+    }{
+      \axiom {y \in dom(\rhos)}
+      \axiom {L \sqsubseteq (\rhos(y) = L)}
+      \axiom {L \sqsubseteq L}
+    }
+    \subder{
+      \stmjudge[L]{\utt{if}(x)\; \texttt{fscanf}(\texttt{stdin}^L, \dots, \&y)}{\rhos'', chs''}{\rhos'', chs''}
+    }{
+      \axiom{\expjudge[L]{\rhos'', chs''}{x}{\texttt{false}^H, chs'''}}
+    }
+    \subder{
+      \stmjudge[p,L]{\utt{if}(y)\;z = \texttt{false}}{\rhos'', chs''}{\rhos''', chs''}
+    }{
+      \axiom{\expjudge[p,L]{\rhos'',chs''}{y}{\texttt{false}^L}}
+    }
+    \subder{
+      \expjudge[p, L]{\rhos''', chs''}{\texttt{fprintf}(\texttt{stdout}^L, \dots, z)}{\{x\mapsto\texttt{false}, y\mapsto\texttt{true}, z\mapsto\texttt{false}\}, chs'''}
+    }{
+      \axiom{\expjudge[p, L]{\rhos''', chs''}{z}{\texttt{false}^L, chs'}}
+      \axiom{L \sqsubseteq L}
+    }
+  }
+}
+\end{nd}
+\]
+
+Derivation of \textbf{Rule 2} on \textbf{Test 1}:
+
+\[
+\begin{nd}
+\der{
+  \expjudge [L] \emptyenv {\lstinline!main ()!} {SecErr}
+}{
+  \subder{
+    \stmjudge [L] {ss} {\emptyenv, chs} {SecErr}
+  }{
+    \subder{
+      \stmjudge [L] {\lstinline!bool x, y!} {\emptyenv, \langle[\texttt{true, true}][][\texttt{false}][]\rangle} {\{x \mapsto ?^L, y \mapsto ?^L\}, chs}
+      }{
+      \axiom {x \notin dom(\rho)}
+      \axiom {y \notin dom(\rho)}
+    }
+    \subder{
+      \stmjudge[L]{\lstinline!bool z = true!}{\rhos, chs}{\rhos', chs}
+    }{
+      \axiom{z \notin dom(\rhos)}
+      \axiom{\expjudge[p,L]{\rhos,chs}{\texttt{true}}{\texttt{true}^L}}
+    }
+    \subder{
+      \stmjudge[L]{\texttt{fscanf}(\texttt{stdin}^{H},\dots, \&x)}{\{x \mapsto ?^L, y \mapsto ?^L\}, chs}{\{x \mapsto \texttt{true}^H, y \mapsto ?^L\}, \langle[],[],[\texttt{true, false}],[]\rangle}
+    }{
+      \axiom {x \in dom(\rhos)}
+      \axiom {L \sqsubseteq (\rhos(x) = H)}
+    }
+    \subder{
+      \stmjudge[L]{\texttt{fscanf}(\texttt{stdin}^{L},\dots, \&y)}{\{x \mapsto \texttt{true}^H, y \mapsto ?^L\}, chs'}{\{x \mapsto \texttt{true}^H, y \mapsto \texttt{true}^L\}, \langle[],[],[\texttt{false}],[]\rangle}
+    }{
+      \axiom {y \in dom(\rhos')}
+      \axiom {L \sqsubseteq (\rhos'(y) = L)}
+    }
+    \subder{
+      \stmjudge[L]{\utt{if}(x)\; \texttt{fscanf}(\texttt{stdin}^L, \dots, \&y)}{\rhos, chs''}{}
+    }{
+      \axiom{\expjudge[L]{\rhos', chs''}{x}{\texttt{true}^H, chs''}}
+      \subder{
+        \stmjudge[H]{\texttt{fscanf}(\texttt{stdin}^{L},\dots, \&y)}{\rhos', chs''}{SecErr }
+      }{
+        \axiom {y \in dom(\rhos')}
+        \axiom {H \sqsubseteq (\rhos'(y) = \texttt{true}^L = L)}
+      }
+    }
+  }
+}
+\end{nd}
+\]
+
+Derivation of \textbf{Rule 2} on \textbf{Test 2}:
+
+\[
+\begin{nd}
+\der{
+  \expjudge [L] \emptyenv {\lstinline!main ()!} {\{x \mapsto \texttt{false}^H, y \mapsto \texttt{true}^H\}, \langle[\texttt{true}],[],[],[]\rangle}
+}{
+  \subder{
+    \stmjudge [L] {ss} {\emptyenv, \langle[\texttt{false}],[],[\texttt{true, false}],[]\rangle} {\{x \mapsto \texttt{false}^H, y \mapsto \texttt{true}^H\}, \langle[\texttt{true}],[],[],[]\rangle}
+  }{
+    \subder{
+      \stmjudge [L] {\lstinline!bool x, y!} {\emptyenv, \langle[\texttt{false}],[\texttt{false}],[\texttt{true}],[]\rangle} {\{x \mapsto ?^L, y \mapsto ?^L\}, \langle[\texttt{false}],[\texttt{false}],[\texttt{true}],[]\rangle}
+    }{
+      \axiom {x \notin dom(\rho)}
+      \axiom {y \notin dom(\rho)}
+    }
+    \subder{
+      \stmjudge[L]{\lstinline!bool z = true!}{\rhos, chs}{\rhos', chs}
+    }{
+      \axiom{z \notin dom(\rhos)}
+      \axiom{\expjudge[p,L]{\rhos,chs}{\texttt{true}}{\texttt{true}^L}}
+    }
+    \subder{
+      \stmjudge[L]{\texttt{fscanf}(\texttt{stdin}^{H},\dots, \&x)}{\{x \mapsto ?^L, y \mapsto ?^L\}, \langle[\texttt{false}],[\texttt{false}],[\texttt{true}],[]\rangle}{\{x \mapsto \texttt{false}^H, y \mapsto ?^L\}, \langle[],[\texttt{false}],[\texttt{true}],[]\rangle}
+    }{
+      \axiom {x \in dom(\rhos)}
+      \axiom {L \sqsubseteq (\rhos(x) = H)}
+    }
+    \subder{
+      \stmjudge[L]{\texttt{fscanf}(\texttt{stdin}^{L},\dots, \&y)}{\{x \mapsto \texttt{false}^H, y \mapsto ?^L\}, \langle[],[\texttt{false}],[\texttt{true}],[]\rangle}{\{x \mapsto \texttt{false}^H, y \mapsto \texttt{true}^H\}, \langle[],[\texttt{false}],[],[]\rangle}
+    }{
+      \axiom {y \in dom(\rhos)}
+      \axiom {L \sqsubseteq (\rhos(y) = L)}
+    }
+    \subder{
+      \stmjudge[L]{\utt{if}(x)\; \texttt{fscanf}(\texttt{stdin}^L, \dots, \&y)}{\rhos, chs}{\rhos, chs}
+    }{
+      \axiom{\expjudge[L]{\rhos, chs}{x}{\texttt{false}^H, chs'}}
+    }
+    \subder{
+      \expjudge[p, L]{\rhos, chs}{\texttt{fprintf}(\texttt{stdout}^L, \dots, y)}{None^L, chs'[out^L := \texttt{true}^H :: out^L]}
+    }{
+      \axiom{\expjudge[p, L]{\rhos, chs}{y}{\texttt{true}^H, chs'}}
+      \axiom{L \sqsubseteq L}
+    }
+  }
+}
+\end{nd}
+\]
+
+
+\end{document}
